@@ -1,3 +1,4 @@
+use bb8::PooledConnection;
 use async_trait::async_trait;
 use diesel::{
     backend::UsesAnsiSavepointSyntax,
@@ -61,11 +62,15 @@ where
 
     async fn is_valid(
         &self,
-        mut conn: Self::Connection,
-    ) -> Result<Self::Connection, Self::Error> {
-        self.run_blocking(|m| {
-            m.is_valid(&mut conn)?;
-            Ok(conn)
+        conn: &mut PooledConnection<'_, Self>,
+    ) -> Result<(), Self::Error> {
+        //Safety: due to instant await of the thread completion soundness of thread synchronization is up to tokio internal implementation, thus child thead can assume that unique connection reference it gets here has static lifetime.
+        let conn: &mut PooledConnection<'static,Self> = unsafe {std::mem::transmute(conn)};
+
+        //thread_synchonization occurs here
+        self.run_blocking(move |m| {
+            m.is_valid(conn)?;
+            Ok(())
         })
         .await
     }

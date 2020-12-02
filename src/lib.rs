@@ -33,16 +33,13 @@ impl<T: Send + 'static> DieselConnectionManager<T> {
         }
     }
 
-    async fn run_blocking<R, F>(&self, f: F) -> R
+    async fn run_blocking<'a,R, F>(&self, f: F) -> R
     where
         R: Send + 'static,
-        F: Send + 'static + FnOnce(&r2d2::ConnectionManager<T>) -> R,
+        F: Send + 'a + FnOnce(&r2d2::ConnectionManager<T>) -> R,
     {
         let cloned = self.inner.clone();
-        tokio::task::spawn_blocking(move || f(&*cloned.lock().unwrap()))
-            .await
-            // Intentionally panic if the inner closure panics.
-            .unwrap()
+        tokio::task::block_in_place(move || f(&*cloned.lock().unwrap()))
     }
 }
 
@@ -64,10 +61,6 @@ where
         &self,
         conn: &mut PooledConnection<'_, Self>,
     ) -> Result<(), Self::Error> {
-        //Safety: due to instant await of the thread completion soundness of thread synchronization is up to tokio internal implementation, thus child thead can assume that unique connection reference it gets here has static lifetime.
-        let conn: &mut PooledConnection<'static,Self> = unsafe {std::mem::transmute(conn)};
-
-        //thread_synchonization occurs here
         self.run_blocking(move |m| {
             m.is_valid(conn)?;
             Ok(())
